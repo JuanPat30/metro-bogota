@@ -1,0 +1,42 @@
+image: google/cloud-sdk:latest 
+
+stages:
+  - build
+  - deploy
+
+variables:
+  PROJECT_ID: "plenary-keel-457913-i8"
+  IMAGE_NAME: "backend"
+  REGION: "us-central1"
+  MYBUCKET: "gs://chatbot-pqrsd-prod-backend/logs"
+
+before_script:
+  - echo "$GCP_SERVICE_ACCOUNT_KEY_BASE64_PROD" | base64 --decode > /tmp/service-account-key.json
+  - gcloud auth activate-service-account --key-file=/tmp/service-account-key.json
+  - gcloud config set project $PROJECT_ID
+
+build:
+  stage: build
+  script:
+    - echo "Building Docker image..."
+    - - gcloud builds submit HistoricoChatMetro/ --tag gcr.io/${PROJECT_ID}/${IMAGE_NAME}:latest --gcs-log-dir=$MYBUCKET
+
+  only:
+    - dev
+    - main
+
+deploy:
+  stage: deploy
+  script:
+    - export ASPNETCORE_ENVIRONMENT=$(gcloud secrets versions access latest --secret=ASPNETCORE_ENVIRONMENT --project=$PROJECT_ID)
+    - |
+      echo "Deploying to Cloud Run ($IMAGE_NAME)..."
+      gcloud beta run deploy "$IMAGE_NAME" \
+        --image "gcr.io/${PROJECT_ID}/${IMAGE_NAME}:latest" \
+        --platform managed \
+        --region "${REGION}" \
+        --update-secrets="ASPNETCORE_ENVIRONMENT=ASPNETCORE_ENVIRONMENT:latest" \
+        --allow-unauthenticated
+  only:
+    - dev
+    - main
